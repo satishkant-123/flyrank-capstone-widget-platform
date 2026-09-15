@@ -1,0 +1,12 @@
+name: flyrank-capstone-widget-platform
+run: npm start
+seed: npm run seed
+test: npm test
+base_url: http://localhost:3000
+endpoints:
+  health: /health
+  config: /api/widgets/wgt_demo_a1/config
+  submit: /api/submissions
+  bundle: /widget.v1.js
+  dashboard_stats: /api/dashboard/stats
+  dashboard_submissions: /api/dashboard/submissions

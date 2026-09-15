@@ -1,0 +1,15 @@
+services:
+  api:
+    build: .
+    ports:
+      - "3000:3000"
+      - "5500:5500"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - BASE_URL=http://localhost:3000
+      - DB_PATH=/app/data/widget_platform.db
+      - JWT_SECRET=production-secret-replace-me-12345
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
