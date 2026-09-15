@@ -55,11 +55,13 @@ describe('PROBE 2 — Boundary Validation: Malformed & Oversized Payloads (Clean
       .post('/api/submissions')
       .send({
         widget_id: 'wgt_demo_a1',
-        data: { email: 'not-an-email' }
+        data: { name: 'Alice', email: 'not-an-email' }
       });
 
     assert.strictEqual(res.status, 400);
-    assert.match(res.body.error, /Invalid email format/i);
+    assert.ok(res.body.error);
+    const hasEmailErr = /email/i.test(res.body.error) || (res.body.details && res.body.details.some((d) => /email/i.test(d.message)));
+    assert.ok(hasEmailErr, 'Must indicate invalid email error');
   });
 
   test('Send submission for non-existent widget -> returns HTTP 404 Not Found JSON error', async () => {

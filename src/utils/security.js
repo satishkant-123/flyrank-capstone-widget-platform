@@ -1,11 +1,20 @@
 const crypto = require('node:crypto');
 
 /**
- * Cryptographic utilities for password hashing and RFC 7519 JSON Web Tokens (JWT)
- * Built with zero external dependencies using Node's native crypto module.
+ * Validate and retrieve the JWT Secret from environment.
+ * Strict Security Guarantee: NEVER allows fallback secrets.
+ * Must be at least 32 characters long to ensure cryptographic resilience against brute-force attacks.
  */
-
-const DEFAULT_SECRET = process.env.JWT_SECRET || 'flyrank-capstone-default-secret-key-change-in-prod';
+function getJwtSecret() {
+  const secret = process.env.JWT_SECRET;
+  if (!secret || typeof secret !== 'string') {
+    throw new Error('FATAL SECURITY ERROR: JWT_SECRET environment variable is missing. A cryptographically strong secret is required.');
+  }
+  if (secret.length < 32) {
+    throw new Error('FATAL SECURITY ERROR: JWT_SECRET is too weak. It must be at least 32 characters long.');
+  }
+  return secret;
+}
 
 /**
  * Hash a password using scrypt with a unique random salt
@@ -28,6 +37,18 @@ function verifyPassword(password, storedHash) {
   const derivedKey = crypto.scryptSync(password, salt, 64);
 
   return crypto.timingSafeEqual(keyBuffer, derivedKey);
+}
+
+/**
+ * Validates password complexity: min 8 characters, at least 1 uppercase, 1 lowercase, 1 number
+ */
+function isStrongPassword(password) {
+  if (!password || typeof password !== 'string') return false;
+  if (password.length < 8) return false;
+  const hasUpper = /[A-Z]/.test(password);
+  const hasLower = /[a-z]/.test(password);
+  const hasNumber = /[0-9]/.test(password);
+  return hasUpper && hasLower && hasNumber;
 }
 
 /**
@@ -54,9 +75,10 @@ function base64UrlDecode(str) {
 }
 
 /**
- * Generate a signed JWT
+ * Generate a signed JWT using HMAC-SHA256
  */
-function signJwt(payload, secret = DEFAULT_SECRET, expiresInSeconds = 86400) {
+function signJwt(payload, secret = null, expiresInSeconds = 86400) {
+  const effectiveSecret = secret || getJwtSecret();
   const header = { alg: 'HS256', typ: 'JWT' };
   const exp = Math.floor(Date.now() / 1000) + expiresInSeconds;
   const fullPayload = { ...payload, exp, iat: Math.floor(Date.now() / 1000) };
@@ -66,7 +88,7 @@ function signJwt(payload, secret = DEFAULT_SECRET, expiresInSeconds = 86400) {
   const dataToSign = `${encodedHeader}.${encodedPayload}`;
 
   const signature = crypto
-    .createHmac('sha256', secret)
+    .createHmac('sha256', effectiveSecret)
     .update(dataToSign)
     .digest('base64')
     .replace(/=/g, '')
@@ -79,7 +101,8 @@ function signJwt(payload, secret = DEFAULT_SECRET, expiresInSeconds = 86400) {
 /**
  * Verify and decode a signed JWT
  */
-function verifyJwt(token, secret = DEFAULT_SECRET) {
+function verifyJwt(token, secret = null) {
+  const effectiveSecret = secret || getJwtSecret();
   if (!token || typeof token !== 'string') {
     throw new Error('Missing or invalid token format');
   }
@@ -93,7 +116,7 @@ function verifyJwt(token, secret = DEFAULT_SECRET) {
   const dataToSign = `${encodedHeader}.${encodedPayload}`;
 
   const expectedSignature = crypto
-    .createHmac('sha256', secret)
+    .createHmac('sha256', effectiveSecret)
     .update(dataToSign)
     .digest('base64')
     .replace(/=/g, '')
@@ -123,8 +146,10 @@ function generateId(prefix = '') {
 }
 
 module.exports = {
+  getJwtSecret,
   hashPassword,
   verifyPassword,
+  isStrongPassword,
   signJwt,
   verifyJwt,
   generateId,

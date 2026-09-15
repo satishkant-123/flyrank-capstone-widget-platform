@@ -6,7 +6,7 @@ Modern web applications frequently embed lead-capture widgets (signup forms, new
 This system provides:
 1. **Multi-tenant widget management** for website owners to configure forms.
 2. **High-performance, cached delivery** of widget assets and configuration.
-3. **A hardened public submission pipeline** featuring strict CORS handling, payload validation, rate limiting, honeypot spam protection, resilient geolocation enrichment with a multi-provider fallback chain, and failure-isolated asynchronous side effects.
+3. **A hardened public submission pipeline** featuring strict CORS handling, payload validation against widget schema, rate limiting, honeypot spam protection, resilient geolocation enrichment with a multi-provider fallback chain, database-enforced idempotency, and failure-isolated asynchronous side effects.
 4. **An owner analytics dashboard** providing metrics and submission tracking.
 
 ---
@@ -29,8 +29,9 @@ Tenancy is strictly enforced at the data layer via a `tenant_id` foreign key. Ev
                                          | button_text (TEXT)    |                   | geo_city (TEXT)         |
                                          | display_options (JSON)|                   | geo_provider (TEXT)     |
                                          | allowed_origins (JSON)|                   | user_agent (TEXT)       |
-                                         | is_active (INTEGER)   |                   | created_at (DATETIME)   |
-                                         | created_at (DATETIME) |                   +-------------------------+
+                                         | is_active (INTEGER)   |                   | idempotency_key (TEXT)  |
+                                         | created_at (DATETIME) |                   | created_at (DATETIME)   |
+                                         | updated_at (DATETIME) |                   +-------------------------+
                                          +-----------------------+
 ```
 
@@ -53,7 +54,7 @@ CREATE TABLE IF NOT EXISTS widgets (
     title TEXT NOT NULL,
     type TEXT NOT NULL DEFAULT 'signup_form', -- signup_form | cta | popover
     description TEXT,
-    fields TEXT NOT NULL DEFAULT '[]', -- JSON definition of form fields
+    fields TEXT NOT NULL DEFAULT '[]', -- JSON array of field schemas
     button_text TEXT NOT NULL DEFAULT 'Submit',
     display_options TEXT NOT NULL DEFAULT '{}', -- JSON (theme, color, position)
     allowed_origins TEXT NOT NULL DEFAULT '["*"]', -- JSON list of allowed origins
@@ -74,13 +75,17 @@ CREATE TABLE IF NOT EXISTS submissions (
     geo_city TEXT,
     geo_provider TEXT, -- 'ip-api' | 'ipapi.co' | 'none'
     user_agent TEXT,
+    idempotency_key TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_submissions_widget_id ON submissions(widget_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_tenant_id ON submissions(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_created_at ON submissions(created_at);
 
--- Background Job / Event Outbox (Side Effects)
+-- Partial Unique Index guaranteeing strict idempotency per widget when a key is supplied
+CREATE UNIQUE INDEX IF NOT EXISTS uq_widget_idempotency ON submissions(widget_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+
+-- Background Job / Event Outbox (Side Effects with Exponential Backoff)
 CREATE TABLE IF NOT EXISTS background_jobs (
     id TEXT PRIMARY KEY,
     type TEXT NOT NULL,
@@ -88,10 +93,11 @@ CREATE TABLE IF NOT EXISTS background_jobs (
     status TEXT NOT NULL DEFAULT 'pending', -- pending | completed | failed
     attempts INTEGER NOT NULL DEFAULT 0,
     last_error TEXT,
+    next_retry_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS idx_jobs_status ON background_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_jobs_status_schedule ON background_jobs(status, next_retry_at);
 ```
 
 ---
@@ -106,8 +112,8 @@ Customer Website (any origin)
     --> GET /api/widgets/wgt_123/config (cached short-term, public, CORS)
     --> Render form UI into container
     --> User submits form
-    --> POST /api/submissions (CORS preflight + boundary validation)
-    --> 201 Created & stored
+    --> POST /api/submissions (CORS preflight + boundary validation + idempotency)
+    --> 201 Created & stored (or 200 OK on idempotent retry)
 ```
 
 ---
@@ -115,11 +121,11 @@ Customer Website (any origin)
 ## 4. API Contracts Across the Three Request Paths
 
 ### Path 1: Widget Owner (Authenticated via Bearer JWT)
-- **POST `/api/auth/signup`**: Create tenant account.
-- **POST `/api/auth/login`**: Authenticate, returns `{ access_token, tenant }`.
+- **POST `/api/auth/signup`**: Create tenant account (password complexity enforced, rate-limited).
+- **POST `/api/auth/login`**: Authenticate, returns `{ access_token, tenant }` (rate-limited).
 - **GET `/api/auth/me`**: Returns tenant profile.
 - **GET `/api/widgets`**: Lists all widgets owned by tenant (`WHERE tenant_id = ?`).
-- **POST `/api/widgets`**: Creates a new widget; returns widget object + `embed_snippet`.
+- **POST `/api/widgets`**: Creates a new widget; returns widget object + `embed_snippet` (strictly validated fields & origins).
 - **GET `/api/widgets/:id`**: Gets single widget details + `embed_snippet`.
 - **PUT `/api/widgets/:id`**: Updates widget configuration.
 - **DELETE `/api/widgets/:id`**: Deletes widget.
@@ -133,46 +139,26 @@ Customer Website (any origin)
 - **GET `/api/widgets/:id/config`**:
   - `Cache-Control: public, max-age=60, stale-while-revalidate=30`
   - `Access-Control-Allow-Origin: *`
-  - Returns:
-    ```json
-    {
-      "id": "wgt_123",
-      "title": "Join our Developer Beta",
-      "description": "Get early access to our platform.",
-      "type": "signup_form",
-      "button_text": "Join Waitlist",
-      "fields": [
-        { "name": "name", "type": "text", "label": "Full Name", "required": true },
-        { "name": "email", "type": "email", "label": "Email Address", "required": true }
-      ],
-      "display_options": { "theme": "dark", "position": "bottom-right" }
-    }
-    ```
+  - Returns small public configuration JSON without internal metadata.
 
 ### Path 3: Website Visitor (Public, CORS, Abuse-Protected)
 - **OPTIONS `/api/submissions`**: Handled with 204 No Content and appropriate CORS headers.
 - **POST `/api/submissions`**:
   - Headers: `Content-Type: application/json`, optional `X-Idempotency-Key`.
-  - Body:
-    ```json
-    {
-      "widget_id": "wgt_123",
-      "data": {
-        "name": "Alex Smith",
-        "email": "alex@example.com"
-      },
-      "_hp_website": ""
-    }
-    ```
+  - Enforces schema matching, required fields, and string length restrictions.
+  - Enforces `allowed_origins` (returns 403 if origin not authorized).
+  - Handles concurrent idempotency race conditions cleanly.
   - Responses:
     - `201 Created`: `{ "success": true, "submission_id": "sub_456" }`
-    - `400 Bad Request`: `{ "error": "Validation failed", "details": [...] }`
-    - `400 Bad Request`: `{ "error": "Spam submission detected" }` (if honeypot filled)
+    - `200 OK`: `{ "success": true, "message": "Idempotent request: submission previously recorded", "submission_id": "sub_456" }`
+    - `400 Bad Request`: `{ "error": "Schema Validation Error", "details": [...] }`
+    - `400 Bad Request`: `{ "error": "Spam submission rejected" }` (honeypot triggered)
+    - `403 Forbidden`: `{ "error": "Forbidden: Origin is not authorized" }`
     - `404 Not Found`: `{ "error": "Widget not found" }`
     - `413 Payload Too Large`: `{ "error": "Payload exceeds 100KB maximum size" }`
-    - `429 Too Many Requests`: `{ "error": "Rate limit exceeded. Please retry later." }`
+    - `429 Too Many Requests`: `{ "error": "Rate limit exceeded" }`
 
 ---
 
 ## 5. Explicit Non-Goal
-**Non-Goal:** We will not build a drag-and-drop WYSIWYG visual form builder or complex form logic workflow engine (e.g. conditional branching, multi-page surveys). The platform strictly targets **embeddable lead-capture and CTA widgets**, prioritizing backend boundary hardening, multi-tenant data isolation, HTTP caching compliance, cross-origin resilience, and fault-tolerant third-party fallback chains.
+**Non-Goal:** We will not build a drag-and-drop WYSIWYG visual form builder or complex multi-page conditional branching survey engine. The platform strictly targets **embeddable lead-capture and CTA widgets**, prioritizing backend boundary hardening, multi-tenant data isolation, HTTP caching compliance, cross-origin resilience, deterministic fallback chains, and race-safe idempotency.

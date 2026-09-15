@@ -1,10 +1,19 @@
 /**
  * In-Memory Sliding Window Rate Limiter for Abuse Protection
- * Supports rate limiting per IP and per widget.
+ * Supports rate limiting per IP and per widget, with secure proxy-trust enforcement.
  */
 
 const ipStore = new Map();
 const widgetStore = new Map();
+const authStore = new Map();
+
+function getClientIp(req) {
+  // Only trust X-Forwarded-For if explicitly configured via TRUST_PROXY
+  if (process.env.TRUST_PROXY === 'true' && req.headers['x-forwarded-for']) {
+    return req.headers['x-forwarded-for'].split(',')[0].trim();
+  }
+  return req.socket?.remoteAddress || '127.0.0.1';
+}
 
 function createRateLimiter(options = {}) {
   const windowMs = options.windowMs || parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 60000;
@@ -13,7 +22,7 @@ function createRateLimiter(options = {}) {
 
   return function rateLimitMiddleware(req, res, next) {
     const now = Date.now();
-    const ip = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1';
+    const ip = getClientIp(req);
     const widgetId = req.body?.widget_id || req.params?.id || req.query?.id;
 
     // --- 1. IP Rate Limiting ---
@@ -64,12 +73,45 @@ function createRateLimiter(options = {}) {
   };
 }
 
+/**
+ * Specialized rate limiter for Authentication endpoints to prevent credential brute-forcing
+ */
+function createAuthRateLimiter(options = {}) {
+  const windowMs = options.windowMs || 60000;
+  const maxAttempts = options.maxAttempts || parseInt(process.env.AUTH_RATE_LIMIT_MAX, 10) || 10;
+
+  return function authRateLimitMiddleware(req, res, next) {
+    const now = Date.now();
+    const ip = getClientIp(req);
+
+    let attempts = authStore.get(ip) || [];
+    attempts = attempts.filter((t) => now - t < windowMs);
+    authStore.set(ip, attempts);
+
+    if (attempts.length >= maxAttempts) {
+      const oldest = attempts[0];
+      const retryAfterSeconds = Math.max(1, Math.ceil((oldest + windowMs - now) / 1000));
+      res.setHeader('Retry-After', retryAfterSeconds);
+      return res.status(429).json({
+        error: 'Too Many Requests: Maximum login/signup attempts exceeded. Please try again later.',
+        retry_after_seconds: retryAfterSeconds
+      });
+    }
+
+    attempts.push(now);
+    next();
+  };
+}
+
 function resetRateLimits() {
   ipStore.clear();
   widgetStore.clear();
+  authStore.clear();
 }
 
 module.exports = {
   createRateLimiter,
+  createAuthRateLimiter,
   resetRateLimits,
+  getClientIp
 };

@@ -14,6 +14,11 @@ const dashboardRoutes = require('./routes/dashboardRoutes');
 
 const app = express();
 
+// Configure trusted proxy forwarding if enabled via environment
+if (process.env.TRUST_PROXY === 'true') {
+  app.set('trust proxy', true);
+}
+
 // 1. Global CORS middleware (handles preflight OPTIONS for all routes)
 app.use(corsMiddleware);
 
