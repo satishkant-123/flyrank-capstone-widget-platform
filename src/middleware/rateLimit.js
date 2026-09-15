@@ -1,0 +1,75 @@
+/**
+ * In-Memory Sliding Window Rate Limiter for Abuse Protection
+ * Supports rate limiting per IP and per widget.
+ */
+
+const ipStore = new Map();
+const widgetStore = new Map();
+
+function createRateLimiter(options = {}) {
+  const windowMs = options.windowMs || parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 60000;
+  const maxPerIp = options.maxPerIp || parseInt(process.env.RATE_LIMIT_MAX_PER_IP, 10) || 10;
+  const maxPerWidget = options.maxPerWidget || parseInt(process.env.RATE_LIMIT_MAX_PER_WIDGET, 10) || 30;
+
+  return function rateLimitMiddleware(req, res, next) {
+    const now = Date.now();
+    const ip = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1';
+    const widgetId = req.body?.widget_id || req.params?.id || req.query?.id;
+
+    // --- 1. IP Rate Limiting ---
+    let ipRecord = ipStore.get(ip) || [];
+    ipRecord = ipRecord.filter((t) => now - t < windowMs);
+    ipStore.set(ip, ipRecord);
+
+    if (ipRecord.length >= maxPerIp) {
+      const oldest = ipRecord[0];
+      const retryAfterSeconds = Math.max(1, Math.ceil((oldest + windowMs - now) / 1000));
+
+      res.setHeader('Retry-After', retryAfterSeconds);
+      res.setHeader('X-RateLimit-Limit', maxPerIp);
+      res.setHeader('X-RateLimit-Remaining', 0);
+      return res.status(429).json({
+        error: 'Too Many Requests: Rate limit exceeded for this IP address.',
+        retry_after_seconds: retryAfterSeconds
+      });
+    }
+
+    // --- 2. Widget Rate Limiting (Burst protection per widget) ---
+    if (widgetId) {
+      let widgetRecord = widgetStore.get(widgetId) || [];
+      widgetRecord = widgetRecord.filter((t) => now - t < windowMs);
+      widgetStore.set(widgetId, widgetRecord);
+
+      if (widgetRecord.length >= maxPerWidget) {
+        const oldest = widgetRecord[0];
+        const retryAfterSeconds = Math.max(1, Math.ceil((oldest + windowMs - now) / 1000));
+
+        res.setHeader('Retry-After', retryAfterSeconds);
+        res.setHeader('X-RateLimit-Limit', maxPerWidget);
+        res.setHeader('X-RateLimit-Remaining', 0);
+        return res.status(429).json({
+          error: 'Too Many Requests: Rate limit exceeded for this widget.',
+          retry_after_seconds: retryAfterSeconds
+        });
+      }
+      widgetRecord.push(now);
+    }
+
+    ipRecord.push(now);
+
+    res.setHeader('X-RateLimit-Limit', maxPerIp);
+    res.setHeader('X-RateLimit-Remaining', Math.max(0, maxPerIp - ipRecord.length));
+
+    next();
+  };
+}
+
+function resetRateLimits() {
+  ipStore.clear();
+  widgetStore.clear();
+}
+
+module.exports = {
+  createRateLimiter,
+  resetRateLimits,
+};
