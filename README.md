@@ -106,8 +106,8 @@ Because submissions originate from arbitrary browsers and origins not controlled
 ### One-Command Setup & Seed
 ```bash
 # 1. Clone repository
-git clone https://github.com/satishkant-123/flyrank_capstone.git
-cd flyrank_capstone
+git clone https://github.com/satishkant-123/flyrank-capstone-widget-platform.git
+cd flyrank-capstone-widget-platform
 
 # 2. Copy environment file (ensure JWT_SECRET is set to >= 32 characters)
 cp .env.example .env
