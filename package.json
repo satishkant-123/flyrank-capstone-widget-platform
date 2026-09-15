@@ -1,0 +1,32 @@
+{
+  "name": "flyrank-capstone-widget-platform",
+  "version": "1.0.0",
+  "description": "Embeddable Widget & Lead-Capture Platform — FlyRank Backend Capstone",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "seed": "node src/db/seed.js",
+    "migrate": "node src/db/migrate.js",
+    "test": "node --test --test-concurrency=1 tests/*.test.js",
+    "serve:customer": "node customer-site/serve.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/satishkant-123/flyrank_capstone.git"
+  },
+  "keywords": [
+    "widget",
+    "lead-capture",
+    "cors",
+    "rate-limiting",
+    "geo-enrichment",
+    "fallback-chain"
+  ],
+  "author": "Satish Kant",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1"
+  }
+}
