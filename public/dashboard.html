@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FlyRank Widget Platform — Owner Dashboard</title>
+  <style>
+    :root {
+      --primary: #4F46E5;
+      --primary-hover: #4338CA;
+      --bg: #0F172A;
+      --card-bg: #1E293B;
+      --border: #334155;
+      --text: #F8FAFC;
+      --muted: #94A3B8;
+      --success: #10B981;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: var(--bg); color: var(--text); padding: 24px; min-height: 100vh; }
+    .container { max-width: 1100px; margin: 0 auto; }
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; border-bottom: 1px solid var(--border); padding-bottom: 16px; }
+    h1 { font-size: 1.5rem; font-weight: 700; color: #FFF; }
+    .user-info { display: flex; align-items: center; gap: 12px; font-size: 0.9rem; }
+    button { background: var(--primary); color: #FFF; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.875rem; }
+    button:hover { background: var(--primary-hover); }
+    .btn-secondary { background: #334155; }
+    .btn-secondary:hover { background: #475569; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 24px; }
+    .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+    .card-title { font-size: 0.85rem; color: var(--muted); text-transform: uppercase; font-weight: 700; margin-bottom: 8px; }
+    .card-val { font-size: 2.2rem; font-weight: 800; color: #FFF; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.875rem; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 600; }
+    .code-box { background: #0B1120; padding: 10px; border-radius: 6px; font-family: monospace; font-size: 0.85rem; overflow-x: auto; margin-top: 6px; border: 1px solid #1E293B; color: #38BDF8; }
+    input, select, textarea { width: 100%; padding: 8px 12px; background: #0F172A; border: 1px solid var(--border); border-radius: 6px; color: #FFF; margin-top: 4px; margin-bottom: 12px; }
+    .badge { padding: 3px 8px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; background: rgba(16, 185, 129, 0.2); color: var(--success); }
+    #login-modal { max-width: 400px; margin: 80px auto; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="auth-panel" class="card" style="max-width: 420px; margin: 60px auto;">
+      <h2 style="margin-bottom: 8px;">Owner Dashboard</h2>
+      <p style="color: var(--muted); font-size: 0.875rem; margin-bottom: 16px;">Sign in to inspect your widgets, analytics, and leads.</p>
+      <label>Email Address</label>
+      <input type="email" id="login-email" value="tenant_a@example.com">
+      <label>Password</label>
+      <input type="password" id="login-password" value="Password123!">
+      <button onclick="login()" style="width: 100%; padding: 10px;">Sign In</button>
+    </div>
+
+    <div id="dashboard-panel" style="display: none;">
+      <header>
+        <div>
+          <h1>Embeddable Lead-Capture Platform</h1>
+          <p style="color: var(--muted); font-size: 0.85rem;">Multi-tenant Owner Analytics & Lead Management</p>
+        </div>
+        <div class="user-info">
+          <span id="tenant-display"></span>
+          <button class="btn-secondary" onclick="logout()">Logout</button>
+        </div>
+      </header>
+
+      <div class="grid">
+        <div class="card">
+          <div class="card-title">Total Submissions</div>
+          <div class="card-val" id="total-count">0</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Active Widgets</div>
+          <div class="card-val" id="active-widgets-count">0</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Top Geo Region</div>
+          <div class="card-val" id="top-geo" style="font-size: 1.5rem; line-height: 2.5rem;">—</div>
+        </div>
+      </div>
+
+      <!-- Widgets & Snippets -->
+      <div class="card" style="margin-bottom: 24px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <h3 style="font-size: 1.1rem;">Your Widgets & Embed Snippets</h3>
+          <button onclick="toggleNewWidgetForm()">+ Create New Widget</button>
+        </div>
+
+        <div id="new-widget-form" style="display: none; background: #162032; padding: 16px; border-radius: 8px; margin-bottom: 16px; border: 1px solid var(--border);">
+          <h4>Create New Widget</h4>
+          <label>Title</label>
+          <input type="text" id="wgt-title" placeholder="e.g. Newsletter Signup">
+          <label>Description</label>
+          <input type="text" id="wgt-desc" placeholder="e.g. Join 5,000+ developers">
+          <label>Button Text</label>
+          <input type="text" id="wgt-btn" placeholder="Subscribe">
+          <button onclick="createWidget()">Save Widget</button>
+        </div>
+
+        <div id="widgets-list"></div>
+      </div>
+
+      <!-- Submissions Table -->
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h3 style="font-size: 1.1rem;">Recent Captured Leads</h3>
+          <button class="btn-secondary" onclick="loadDashboardData()">Refresh</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Date & Time</th>
+              <th>Widget</th>
+              <th>Payload</th>
+              <th>IP</th>
+              <th>Location</th>
+              <th>Provider</th>
+            </tr>
+          </thead>
+          <tbody id="submissions-body">
+            <tr><td colspan="6" style="text-align: center; color: var(--muted);">No submissions captured yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let token = localStorage.getItem('tenant_token');
+    if (token) {
+      showDashboard();
+    }
+
+    async function login() {
+      const email = document.getElementById('login-email').value;
+      const password = document.getElementById('login-password').value;
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Login failed');
+        token = data.token;
+        localStorage.setItem('tenant_token', token);
+        localStorage.setItem('tenant_info', JSON.stringify(data.tenant));
+        showDashboard();
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    function logout() {
+      localStorage.removeItem('tenant_token');
+      localStorage.removeItem('tenant_info');
+      token = null;
+      document.getElementById('auth-panel').style.display = 'block';
+      document.getElementById('dashboard-panel').style.display = 'none';
+    }
+
+    function showDashboard() {
+      document.getElementById('auth-panel').style.display = 'none';
+      document.getElementById('dashboard-panel').style.display = 'block';
+      const tenant = JSON.parse(localStorage.getItem('tenant_info') || '{}');
+      document.getElementById('tenant-display').textContent = (tenant.name || tenant.email || 'Tenant');
+      loadDashboardData();
+    }
+
+    async function loadDashboardData() {
+      if (!token) return;
+      try {
+        // Fetch stats
+        const statsRes = await fetch('/api/dashboard/stats', {
+          headers: { 'Authorization': 'Bearer ' + token }
+        });
+        if (statsRes.status === 401) { logout(); return; }
+        const stats = await statsRes.json();
+        document.getElementById('total-count').textContent = stats.total_submissions;
+        document.getElementById('top-geo').textContent = stats.geo_breakdown && stats.geo_breakdown[0]
+          ? stats.geo_breakdown[0].country + ' (' + stats.geo_breakdown[0].count + ')'
+          : 'None';
+
+        // Fetch widgets
+        const widgetsRes = await fetch('/api/widgets', {
+          headers: { 'Authorization': 'Bearer ' + token }
+        });
+        const widgets = await widgetsRes.json();
+        document.getElementById('active-widgets-count').textContent = widgets.items ? widgets.items.length : 0;
+        renderWidgets(widgets.items || []);
+
+        // Fetch submissions
+        const subRes = await fetch('/api/dashboard/submissions', {
+          headers: { 'Authorization': 'Bearer ' + token }
+        });
+        const subData = await subRes.json();
+        renderSubmissions(subData.items || []);
+      } catch (err) {
+        console.error('Error loading dashboard:', err);
+      }
+    }
+
+    function renderWidgets(widgets) {
+      const container = document.getElementById('widgets-list');
+      if (widgets.length === 0) {
+        container.innerHTML = '<p style="color: var(--muted); font-size: 0.9rem;">No widgets created yet.</p>';
+        return;
+      }
+      container.innerHTML = widgets.map(w => `
+        <div style="background: #162032; padding: 14px; border-radius: 8px; margin-top: 10px; border: 1px solid var(--border);">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <strong>${escapeHtml(w.title)}</strong>
+            <span class="badge">${w.type}</span>
+          </div>
+          <p style="color: var(--muted); font-size: 0.8rem; margin: 4px 0;">${escapeHtml(w.description || '')}</p>
+          <div style="font-size: 0.75rem; color: var(--muted); margin-top: 6px;">Embed Snippet (Paste into any webpage):</div>
+          <div class="code-box">${escapeHtml(w.embed_snippet)}</div>
+        </div>
+      `).join('');
+    }
+
+    function renderSubmissions(items) {
+      const tbody = document.getElementById('submissions-body');
+      if (!items || items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--muted);">No submissions captured yet.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = items.map(sub => `
+        <tr>
+          <td>${new Date(sub.created_at).toLocaleString()}</td>
+          <td><strong>${escapeHtml(sub.widget_title || sub.widget_id)}</strong></td>
+          <td><code>${escapeHtml(JSON.stringify(sub.payload))}</code></td>
+          <td>${escapeHtml(sub.visitor_ip || '—')}</td>
+          <td>${escapeHtml(sub.geo_country ? (sub.geo_country + (sub.geo_city ? ', ' + sub.geo_city : '')) : 'Unknown')}</td>
+          <td><span class="badge" style="background: #334155; color: #94A3B8;">${escapeHtml(sub.geo_provider || 'none')}</span></td>
+        </tr>
+      `).join('');
+    }
+
+    function toggleNewWidgetForm() {
+      const form = document.getElementById('new-widget-form');
+      form.style.display = form.style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function createWidget() {
+      const title = document.getElementById('wgt-title').value;
+      const description = document.getElementById('wgt-desc').value;
+      const button_text = document.getElementById('wgt-btn').value;
+
+      try {
+        const res = await fetch('/api/widgets', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+          },
+          body: JSON.stringify({
+            title,
+            description,
+            button_text: button_text || 'Submit',
+            type: 'signup_form',
+            fields: [
+              { name: 'name', type: 'text', label: 'Full Name', required: true },
+              { name: 'email', type: 'email', label: 'Email Address', required: true }
+            ]
+          })
+        });
+        if (!res.ok) throw new Error('Failed to create widget');
+        toggleNewWidgetForm();
+        loadDashboardData();
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+  </script>
+</body>
+</html>
